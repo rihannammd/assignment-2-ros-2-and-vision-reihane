@@ -4,61 +4,80 @@ from aisd_msgs.msg import Hand
 from geometry_msgs.msg import Twist
 
 
-class MovePB(Node):
-
+class MotionCommander(Node):
     def __init__(self):
         super().__init__('motion_commander')
-        self.subscription = self.create_subscription(
+
+        # Subscribing to the 'cmd_hands' topic
+        self.hand_subscription = self.create_subscription(
             Hand,
             'cmd_hands',
-            self.listener_callback,
-            10) 
+            self.process_hand_command,
+            10
+        )
 
-        # self.br = CvBridge()
-        self.vel_publisher = self.create_publisher(Twist, 'cmd_vel', 10) 
+        # Publishing to the 'cmd_vel' topic
+        self.velocity_publisher = self.create_publisher(Twist, 'cmd_vel', 10)
 
-        self.subscription  # prevent unused variable warning
+        self.get_logger().info("MotionCommander Node has been initialized.")
 
-    def listener_callback(self, msg):
+    def process_hand_command(self, msg: Hand):
+        """
+        Processes hand commands and publishes appropriate velocity commands.
 
-        angle = 0.0
-        linear = 0.0
-        if msg.xindex > 0.55: 
-            self.get_logger().info('right')
-            angle = -0.1
+        Args:
+            msg (Hand): The Hand message containing gesture information.
+        """
+        # Initialize movement parameters
+        angular_velocity = 0.0
+        linear_velocity = 0.0
+
+        # Determine angular direction based on xindex position
+        if msg.xindex > 0.55:
+            self.get_logger().info("Gesture detected: Move Right")
+            angular_velocity = -0.1
         elif msg.xindex < 0.45:
-            self.get_logger().info('left') 
-            angle = 0.1
-        else:
-            angle = 0.0
-        if msg.xindex > msg.xpinky: 
-            self.get_logger().info('come')
-            linear = 0.5
-        else:
-            self.get_logger().info('stay')
-            linear = 0.0
-        twist = Twist()
-        twist.linear.x = linear
-        twist.angular.z = angle
-        if self.vel_publisher.get_subscription_count() > 0:
-            self.vel_publisher.publish(twist)
-        else:
-            self.get_logger().info('waiting for subcriber')
+            self.get_logger().info("Gesture detected: Move Left")
+            angular_velocity = 0.1
 
+        # Determine linear movement based on hand positions
+        if msg.xindex > msg.xpinky:
+            self.get_logger().info("Gesture detected: Move Forward")
+            linear_velocity = 0.5
+        else:
+            self.get_logger().info("Gesture detected: Stay in Place")
+            linear_velocity = 0.0
+
+        # Create and publish the velocity command
+        velocity_command = Twist()
+        velocity_command.linear.x = linear_velocity
+        velocity_command.angular.z = angular_velocity
+
+        if self.velocity_publisher.get_subscription_count() > 0:
+            self.velocity_publisher.publish(velocity_command)
+            self.get_logger().debug(f"Published Twist: Linear={linear_velocity}, Angular={angular_velocity}")
+        else:
+            self.get_logger().warn("No subscribers detected on 'cmd_vel'. Command not sent.")
+
+    def cleanup(self):
+        """
+        Performs any necessary cleanup before shutting down the node.
+        """
+        self.get_logger().info("Shutting down MotionCommander Node.")
+        self.destroy_node()
 
 
 def main(args=None):
     rclpy.init(args=args)
 
-    move = MovePB()
-
-    rclpy.spin(move)
-
-    # Destroy the node explicitly
-    # (optional - otherwise it will be done automatically
-    # when the garbage collector destroys the node object)
-    move.destroy_node()
-    rclpy.shutdown()
+    try:
+        motion_commander = MotionCommander()
+        rclpy.spin(motion_commander)
+    except KeyboardInterrupt:
+        motion_commander.get_logger().info("Node interrupted by user.")
+    finally:
+        motion_commander.cleanup()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
